@@ -76,17 +76,55 @@ esp_err_t clientEventHandler(esp_http_client_event_t *evt) {
     return ESP_OK;
 }
 
+
 static void set_static_ip(esp_netif_t *netif){
     //stop the DHCP client
     ESP_ERROR_CHECK(esp_netif_dhcpc_stop(netif));
 
     //set the static IP address
     esp_netif_ip_info_t ip_info;
-    IP4_ADDR(&ip_info.ip, 192, 168, 20, 99);
-   	IP4_ADDR(&ip_info.gw, 192, 168, 20, 1);
-   	IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
 
+    // IP4_ADDR(&ip_info.ip, 192, 168, 20, 99);
+    //set the gateway and netmask which will always be the same...
+
+   	IP4_ADDR(&ip_info.gw, 192, 168, 20, 1);
+   	IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);   
+
+    esp_ip4_addr_t IPAddress;
+    //set the default IP address (decimal format)
+    IPAddress.addr = esp_ip4addr_aton("192.168.20.99");
+
+    //see if there is an IP address set in nvs
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        //if there's an error, we'll just use the default IP set above
+        ESP_LOGI(TAG,"Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+
+        //printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+    } else {
+        uint32_t savedIP = 0;
+        if ( nvs_get_u32(my_handle, "saved_ip", &savedIP) == ESP_OK) {
+            IPAddress.addr = savedIP;
+            //dIP = savedIP;
+            //printf("Setting IP to %d from nvs",savedIP);
+            ESP_LOGI(TAG,"Setting IP to %d from nvs",savedIP);
+        } else {
+            ESP_LOGI(TAG,"No nvs entry for 'saved_ip' - using default");
+        }
+    }
+
+    //Now can set the IP info...
+    ip_info.ip = IPAddress;
+    //...and save
     ESP_ERROR_CHECK(esp_netif_set_ip_info(netif, &ip_info));
+    
+    //set the IP address
+    //esp_ip4_addr_t x;
+    //x.addr = dIP; //1679075520;  //192.168.20.100
+    //ip_info.ip = x;
+
+
 
     //set the dns
     esp_netif_dns_info_t dns;
@@ -116,13 +154,11 @@ ESP_LOGI(TAG,"Wift event: %d",event_id);
     case SYSTEM_EVENT_STA_CONNECTED:
         ESP_LOGI(TAG,"connected\n");
 
-    
-/* - don't think it needs to be done here...
         if (event_base == WIFI_EVENT) {
             ESP_LOGI(TAG,"setting ip\n");
             set_static_ip(event_handler_arg);
         }
-*/
+
         break;
 
 
@@ -160,8 +196,6 @@ ESP_LOGI(TAG,"Wift event: %d",event_id);
 void myWifiInit() {
     //assume nvs_flash_init() set in main script (as may be used for other purposes)
 
-    
-
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -173,7 +207,6 @@ void myWifiInit() {
 
     //handle specific events
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event_handler,netif_sta));
-
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_event_handler,netif_sta));
 
     //use RAM (rather than flash) for internal use of the wifi stack
@@ -190,6 +223,7 @@ void myWifiInit() {
     };
 
 
+    //set the wifi mode. If not, it doesn't seem to connect properly...
     esp_wifi_set_mode(WIFI_MODE_STA);
     //esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
